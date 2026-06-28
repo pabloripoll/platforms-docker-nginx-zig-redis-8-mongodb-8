@@ -1,0 +1,250 @@
+# This Makefile requires GNU Make.
+MAKEFLAGS += --silent
+
+# Settings
+ifeq ($(strip $(OS)),Windows_NT) # is Windows_NT on XP, 2000, 7, Vista, 10...
+    DETECTED_OS := Windows
+	C_BLU=''
+	C_GRN=''
+	C_RED=''
+	C_YEL=''
+	C_END=''
+else
+    DETECTED_OS := $(shell uname) # same as "uname -s"
+	C_BLU='\033[0;34m'
+	C_GRN='\033[0;32m'
+	C_RED='\033[0;31m'
+	C_YEL='\033[0;33m'
+	C_END='\033[0m'
+endif
+
+include .env
+
+ROOT_DIR=$(patsubst %/,%,$(dir $(realpath $(firstword $(MAKEFILE_LIST)))))
+DIR_BASENAME=$(shell basename $(ROOT_DIR))
+
+# -------------------------------------------------------------------------------------------------
+#  Help
+# -------------------------------------------------------------------------------------------------
+.PHONY: help
+
+help: ## shows this Makefile help message
+	echo "Usage: $$ make "${C_GRN}"[target]"${C_END}
+	echo ${C_GRN}"Targets:"${C_END}
+	awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_-]+:.*?## / {printf "$$ make \033[0;33m%-30s\033[0m %s\n", $$1, $$2}' ${MAKEFILE_LIST} | column -t -c 2 -s ':#'
+
+# -------------------------------------------------------------------------------------------------
+#  System
+# -------------------------------------------------------------------------------------------------
+.PHONY: local-info local-ownership local-ownership-set
+
+local_ip ?= $(word 1,$(shell hostname -I))
+local-info: ## shows local machine ip and container ports set
+	echo ${C_BLU}"Local IP / Hostname:"${C_END} ${C_YEL}"$(local_ip)"${C_END}
+
+user ?= ${USER}
+group ?= root
+local-ownership: ## shows local ownership
+	echo $(user):$(group)
+
+local-ownership-set: ## sets recursively local root directory ownership
+	$(SUDO) chown -R ${user}:${group} $(ROOT_DIR)/
+
+# -------------------------------------------------------------------------------------------------
+#  Networking
+# -------------------------------------------------------------------------------------------------
+.PHONY: network-exists network-create network-info network-destroy
+
+network-exists: ## lists all local networks
+	$(DOCKER) network ls
+
+network-create: ## creates network
+	$(DOCKER) network create --driver bridge $(PROJECT_LEAD)-$(PROJECT_CNET)
+
+network-info: ## shows network information
+	$(DOCKER) network inspect $(PROJECT_LEAD)-$(PROJECT_CNET) --format '{{json .Containers}}'
+
+network-destroy: ## destroys network
+	$(DOCKER) network rm $(PROJECT_LEAD)-$(PROJECT_CNET)
+
+# -------------------------------------------------------------------------------------------------
+#  Backend API Service
+# -------------------------------------------------------------------------------------------------
+.PHONY: apirest-hostcheck apirest-info apirest-set apirest-create apirest-network apirest-ssh apirest-start apirest-stop apirest-destroy
+
+apirest-hostcheck: ## shows this project ports availability on local machine for apirest container
+	cd platforms/$(APIREST_PLTF) && $(MAKE) port-check
+
+apirest-info: ## shows the apirest docker related information
+	cd platforms/$(APIREST_PLTF) && $(MAKE) info
+
+apirest-set: ## sets the apirest enviroment file to build the container
+	cd platforms/$(APIREST_PLTF) && $(MAKE) env-set
+
+apirest-build: ## builds and ensures changes in the Dockerfile, build steps, or copied-in files are applied
+	cd platforms/$(APIREST_PLTF) && $(MAKE) build
+
+apirest-create: ## starts up or creates the container for running in detached mode
+	cd platforms/$(APIREST_PLTF) && $(MAKE) up
+
+apirest-network: ## starts up into an existing custom network for container-to-container communication, runnning in detached mode
+	cd platforms/$(APIREST_PLTF) && $(MAKE) clear network
+
+apirest-host-gateway: ## starts up for container-to-host communication, runnning in detached mode
+	$(MAKE) apirest-stop
+	cd platforms/$(APIREST_PLTF) && $(MAKE) clear host-gateway
+
+apirest-ssh: ## enters the apirest container shell
+	cd platforms/$(APIREST_PLTF) && $(MAKE) ssh
+
+apirest-start: ## starts the apirest container running
+	cd platforms/$(APIREST_PLTF) && $(MAKE) start
+
+apirest-stop: ## stops the apirest container but its assets will not be destroyed
+	cd platforms/$(APIREST_PLTF) && $(MAKE) stop
+
+apirest-restart: ## restarts the running apirest container
+	cd platforms/$(APIREST_PLTF) && $(MAKE) restart
+
+apirest-destroy: ## destroys completly the apirest container
+	echo ${C_RED}"Attention!"${C_END};
+	echo ${C_YEL}"You're about to remove the "${C_BLU}"$(APIREST_PLTF)"${C_END}" container and delete its image resource."${C_END};
+	@echo -n ${C_RED}"Are you sure to proceed? "${C_END}"[y/n]: " && read response && if [ $${response:-'n'} != 'y' ]; then \
+        echo ${C_GRN}"K.O.! container has been stopped but not destroyed."${C_END}; \
+    else \
+		cd platforms/$(APIREST_PLTF) && $(MAKE) stop clear destroy; \
+		echo -n ${C_GRN}"Do you want to clear DOCKER cache? "${C_END}"[y/n]: " && read response && if [ $${response:-'n'} != 'y' ]; then \
+			echo ${C_YEL}"The following command is delegated to be executed by user:"${C_END}; \
+			echo "$$ $(DOCKER) system prune"; \
+		else \
+			$(DOCKER) system prune; \
+			echo ${C_GRN}"O.K.! DOCKER cache has been cleared up."${C_END}; \
+		fi \
+	fi
+
+# -------------------------------------------------------------------------------------------------
+#  Redis Service
+# -------------------------------------------------------------------------------------------------
+.PHONY: redis-hostcheck redis-info redis-set redis-create redis-ssh redis-start redis-stop redis-destroy
+
+redis-hostcheck: ## shows this project ports availability on local machine for database container
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) port-check
+
+redis-info: ## shows docker related information
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) info
+
+redis-set: ## sets the database enviroment file to build the container
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) env-set
+
+redis-build: ## builds and ensures changes in the Dockerfile, build steps, or copied-in files are applied
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) build
+
+redis-create: ## starts up or creates the container for running in detached mode
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) up
+
+redis-network: ## starts up into an existing custom network for container-to-container communication, runnning in detached mode
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) clear network
+
+redis-ssh: ## enters the container shell
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) ssh
+
+redis-start: ## starts the database container running
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) start
+
+redis-stop: ## stops the database container but its assets will not be destroyed
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) stop
+
+redis-restart: ## restarts the running database container
+	cd platforms/$(DATABASE_PLTF) && $(MAKE) restart
+
+redis-destroy: ## destroys completly the database container with its data
+	echo ${C_RED}"Attention!"${C_END};
+	echo ${C_YEL}"You're about to remove the "${C_BLU}"$(DATABASE_PLTF)"${C_END}" container and delete its image resource and persistance data."${C_END};
+	@echo -n ${C_RED}"Are you sure to proceed? "${C_END}"[y/n]: " && read response && if [ $${response:-'n'} != 'y' ]; then \
+        echo ${C_GRN}"K.O.! container has been stopped but not destroyed."${C_END}; \
+    else \
+		cd platforms/$(DATABASE_PLTF) && $(MAKE) clear destroy; \
+		echo -n ${C_GRN}"Do you want to clear DOCKER cache? "${C_END}"[y/n]: " && read response && if [ $${response:-'n'} != 'y' ]; then \
+			echo ${C_YEL}"The following commands are delegated to be executed by user:"${C_END}; \
+			echo "$$ $(DOCKER) system prune"; \
+			echo "$$ $(DOCKER) volume prune"; \
+		else \
+			$(DOCKER) system prune; \
+			$(DOCKER) volume prune; \
+			echo ${C_GRN}"O.K.! DOCKER cache has been cleared up."${C_END}; \
+		fi \
+	fi
+
+# -------------------------------------------------------------------------------------------------
+#  MongoDB Service
+# -------------------------------------------------------------------------------------------------
+.PHONY: mongo-hostcheck mongo-info mongo-set mongo-create mongo-ssh mongo-start mongo-stop mongo-destroy
+
+mongo-hostcheck: ## shows this project ports availability on local machine for database container
+	cd platforms/$(MONGODB_PLTF) && $(MAKE) port-check
+
+mongo-info: ## shows docker related information
+	cd platforms/$(MONGODB_PLTF) && $(MAKE) info
+
+mongo-set: ## sets the database enviroment file to build the container
+	cd platforms/$(MONGODB_PLTF) && $(MAKE) env-set
+
+mongo-build: ## builds and ensures changes in the Dockerfile, build steps, or copied-in files are applied
+	cd platforms/$(MONGODB_PLTF) && $(MAKE) build
+
+mongo-create: ## starts up or creates the container for running in detached mode
+	cd platforms/$(MONGODB_PLTF) && $(MAKE) up
+
+mongo-network: ## starts up into an existing custom network for container-to-container communication, runnning in detached mode
+	cd platforms/$(MONGODB_PLTF) && $(MAKE) clear network
+
+mongo-ssh: ## enters the apirest container shell
+	cd platforms/$(MONGODB_PLTF) && $(MAKE) ssh
+
+mongo-start: ## starts the database container running
+	cd platforms/$(MONGODB_PLTF) && $(MAKE) start
+
+mongo-stop: ## stops the database container but its assets will not be destroyed
+	cd platforms/$(MONGODB_PLTF) && $(MAKE) stop
+
+mongo-restart: ## restarts the running database container
+	cd platforms/$(MONGODB_PLTF) && $(MAKE) restart
+
+mongo-destroy: ## destroys completly the database container with its data
+	echo ${C_RED}"Attention!"${C_END};
+	echo ${C_YEL}"You're about to remove the "${C_BLU}"$(MONGODB_PLTF)"${C_END}" container and delete its image resource and persistance data."${C_END};
+	@echo -n ${C_RED}"Are you sure to proceed? "${C_END}"[y/n]: " && read response && if [ $${response:-'n'} != 'y' ]; then \
+        echo ${C_GRN}"K.O.! container has been stopped but not destroyed."${C_END}; \
+    else \
+		cd platforms/$(MONGODB_PLTF) && $(MAKE) stop clear destroy; \
+		echo -n ${C_GRN}"Do you want to clear DOCKER cache? "${C_END}"[y/n]: " && read response && if [ $${response:-'n'} != 'y' ]; then \
+			echo ${C_YEL}"The following commands are delegated to be executed by user:"${C_END}; \
+			echo "$$ $(DOCKER) system prune"; \
+			echo "$$ $(DOCKER) volume prune"; \
+		else \
+			$(DOCKER) system prune; \
+			$(DOCKER) volume prune; \
+			echo ${C_GRN}"O.K.! DOCKER cache has been cleared up."${C_END}; \
+		fi \
+	fi
+
+# -------------------------------------------------------------------------------------------------
+#  Repository Helper
+# -------------------------------------------------------------------------------------------------
+.PHONY: repo-flush repo-commit
+
+repo-flush: ## echoes clearing commands for git repository cache on local IDE and sub-repository tracking remove
+	echo ${C_YEL}"Clear repository for untracked files:"${C_END}
+	echo ${C_YEL}"$$"${C_END}" git rm -rf --cached .; git add .; git commit -m \"maint: cache cleared for untracked files\""
+	echo ""
+	echo ${C_YEL}"Detach REST/GRPC API repository from platforms repository:"${C_END}
+	echo ${C_YEL}"$$"${C_END}" git rm -r --cached -- \"api-rest/*\" \":(exclude)api-rest/.gitkeep\""
+	echo ${C_YEL}"$$"${C_END}" git rm -r --cached -- \"api-grpc/*\" \":(exclude)api-grpc/.gitkeep\""
+
+repo-commit: ## echoes common git commands
+	echo ${C_YEL}"Common commiting commands:"${C_END}
+	echo ${C_YEL}"$$"${C_END}" git add . && git commit -m \"feat: ... \""
+	echo ""
+	echo ${C_YEL}"For fixing pushed commit comment:"${C_END}
+	echo ${C_YEL}"$$"${C_END}" git commit --amend"
+	echo ${C_YEL}"$$"${C_END}" git push --force origin [branch]"
